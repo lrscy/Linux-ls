@@ -14,9 +14,8 @@
 const int MAX_PATH_LEN = 512;
 const int MAXN = 1 << 10;
 
-struct stat statbuf[MAXN];
-
 char dirs_path[MAXN][MAX_PATH_LEN];
+char cur_path[MAX_PATH_LEN];
 bool flags[30];
 int oprandw, ndir;
 
@@ -27,31 +26,30 @@ void get_oprands( int argc, char **argv ) {
         switch( ch ) {
             case 'A': flags[0] = true; break;
             case 'a': flags[1] = true; break;
-            case 'C': flags[2] = true; break;
-            case 'c': flags[3] = true; break;
+            case 'C': flags[2] = true; flags[21] = flags[10] = flags[11] = flags[20] = false; break;
+            case 'c': flags[3] = true; flags[18] = flags[17] = false; break;
             case 'd': flags[4] = true; break;
             case 'F': flags[5] = true; break;
             case 'f': flags[6] = true; break;
             case 'h': flags[7] = true; break;
             case 'i': flags[8] = true; break;
             case 'k': flags[9] = true; break;
-            case 'l': flags[10] = true; break;
-            case 'n': flags[11] = true; break;
-            case 'q': flags[12] = true; break;
+            case 'l': flags[10] = true; flags[21] = flags[2] = flags[11] = flags[20] = false; break;
+            case 'n': flags[11] = true; flags[21] = flags[2] = flags[10] = flags[20] = false; break;
+            case 'q': flags[12] = true; flags[19] = false; break;
             case 'R': flags[13] = true; break;
             case 'r': flags[14] = true; break;
             case 'S': flags[15] = true; break;
             case 's': flags[16] = true; break;
             case 't': flags[17] = true; break;
-            case 'u': flags[18] = true; break;
-            case 'w': flags[19] = true;
+            case 'u': flags[18] = true; flags[3] = flags[17] = false; break;
+            case 'w': flags[19] = true; flags[12] = false;
                       if( -1 == sscanf( optarg, "%d", &oprandw ) ) {
                           printf( "ls : option needs a parameters -- w\n" );
                       }
                       break;
-            case 'x': flags[20] = true; break;
-            case '1': flags[21] = true; break;
-            default: printf( "ls : Error parameter\n" );
+            case 'x': flags[20] = true; flags[21] = flags[2] = flags[10] = flags[11] = false; break;
+            case '1': flags[21] = true; flags[2] = flags[10] = flags[11] = flags[20] = false; break;
         }
     }
     return ;
@@ -69,6 +67,18 @@ void get_dirs_path( int argc, char **argv ) {
     return ;
 }
 
+int cmp( const void *a, const void *b ) {
+    struct stat sa, sb;
+    char patha[MAX_PATH_LEN], pathb[MAX_PATH_LEN];
+    strcpy( patha, cur_path ); strcat( patha, "/" ); strcat( patha, ( *( struct dirent ** )a )->d_name );
+    strcpy( pathb, cur_path ); strcat( pathb, "/" ); strcat( pathb, ( *( struct dirent ** )b )->d_name );
+    lstat( patha, &sa ); lstat( pathb, &sb );
+    if( flags[17] ) return sa.st_mtime - sb.st_mtime;       // -t
+    else if( flags[3] ) return sa.st_ctime - sb.st_ctime;   // -c
+    else if( flags[18] ) return sa.st_atime - sb.st_atime;  // -u
+    return strcmp( ( *( struct dirent ** )a )->d_name, ( *( struct dirent ** )b )->d_name );
+}
+
 void do_ls_dir( char *name ) {
     DIR *pdir;
     struct dirent *filenames[MAXN];
@@ -79,17 +89,41 @@ void do_ls_dir( char *name ) {
         return ;
     }
     while( ( filenames[nfile] = readdir( pdir ) ) != NULL ) {
+        // -a
         if( flags[1] ) { ++nfile; continue; }
+        // -A
         if( flags[0] && !strcmp( filenames[nfile]->d_name, "." ) &&
                         !strcmp( filenames[nfile]->d_name, ".." ) ) {
             ++nfile; continue;
         }
+        if( filenames[nfile]->d_name[0] != '.' ) ++nfile;
     }
     closedir( pdir );
-    ;
+    // -f
+    if( !flags[6] ) {
+        for( int i = 0; i < nfile; ++i ) {
+            printf( "%s -- ", filenames[i]->d_name );
+        }
+        puts( "" );
+        strcpy( cur_path, name );
+        qsort( filenames, nfile, sizeof( filenames[0] ), cmp );
+        // -r
+        if( flags[14] ) {
+            struct dirent *tmp;
+            for( int i = 0; i < nfile / 2; ++i ) {
+                tmp = filenames[i];
+                filenames[i] = filenames[nfile - i - 1];
+                filenames[nfile - i - 1] = tmp;
+            }
+        }
+    }
+    for( int i = 0; i < nfile; ++i ) {
+        printf( "%s\n", filenames[i]->d_name );
+    }
     return ;
 }
 
+// -R
 void do_ls_dir_R( char *name ) {
     DIR *pdir;
     struct dirent *filename;
@@ -100,10 +134,11 @@ void do_ls_dir_R( char *name ) {
         fprintf( stderr, "ls1: cannot open %s, not a directory.\n", name );
         return ;
     }
+    do_ls_dir( name );
     while( ( filename = readdir( pdir ) ) != NULL ) {
         if( filename->d_type & DT_DIR ) {
+            if( strcmp( filename->d_name, "." ) == 0 || strcmp( filename->d_name, ".." ) == 0 ) continue;
             sprintf( ch_path, "%s/%s", name, filename->d_name );
-            do_ls_dir( ch_path );
             do_ls_dir_R( ch_path );
         }
     }
@@ -115,15 +150,23 @@ void do_ls() {
     for( int i = 0; i < ndir; ++i ) {
         if( ndir - 1 ) printf( "%s:\n", dirs_path[i] );
         if( !flags[13] ) do_ls_dir( dirs_path[i] );
-        else do_ls_dir_R( dirs_path[i] );
+        else {
+            printf( "%s:\n", dirs_path[i] );
+            do_ls_dir_R( dirs_path[i] );
+        }
         if( i != ndir - 1 ) puts( "" );
     }
     return ;
 }
 
+int cmpstr( const void *p, const void *q ) {
+    return strcmp( ( const char * )p, ( const char * )q );
+}
+
 int main( int argc, char **argv ) {
     get_oprands( argc, argv );
     get_dirs_path( argc, argv );
+    qsort( dirs_path, ndir, sizeof( char ) * MAX_PATH_LEN, cmpstr );
     do_ls();
     return 0;
 }
