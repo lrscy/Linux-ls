@@ -19,6 +19,10 @@ char cur_path[MAX_PATH_LEN];
 bool flags[30];
 int oprandw, ndir;
 
+int max( int a, int b ) {
+    return a > b ? a : b;
+}
+
 void get_oprands( int argc, char **argv ) {
     memset( flags, false, sizeof( flags ) );
     char ch;
@@ -41,7 +45,7 @@ void get_oprands( int argc, char **argv ) {
             case 'r': flags[14] = true; break;
             case 'S': flags[15] = true; break;
             case 's': flags[16] = true; break;
-            case 't': flags[17] = true; break;
+            case 't': flags[17] = true; flags[3] = flags[18] = false; break;
             case 'u': flags[18] = true; flags[3] = flags[17] = false; break;
             case 'w': flags[19] = true; flags[12] = false;
                       if( -1 == sscanf( optarg, "%d", &oprandw ) ) {
@@ -76,7 +80,8 @@ int cmp( const void *a, const void *b ) {
     if( flags[17] ) return sa.st_mtime - sb.st_mtime;       // -t
     else if( flags[3] ) return sa.st_ctime - sb.st_ctime;   // -c
     else if( flags[18] ) return sa.st_atime - sb.st_atime;  // -u
-    return strcmp( ( *( struct dirent ** )a )->d_name, ( *( struct dirent ** )b )->d_name );
+    else if( flags )  return sb.st_size - sa.st_size;       // -S
+    return strcmp( ( *( struct dirent ** )a )->d_name, ( *( struct dirent ** )b )->d_name );    // default
 }
 
 void do_ls_dir( char *name ) {
@@ -101,9 +106,9 @@ void do_ls_dir( char *name ) {
     closedir( pdir );
     // -f
     if( !flags[6] ) {
-        for( int i = 0; i < nfile; ++i ) {
-            printf( "%s -- ", filenames[i]->d_name );
-        }
+//        for( int i = 0; i < nfile; ++i ) {
+//            printf( "%s -- ", filenames[i]->d_name );
+//        }
         puts( "" );
         strcpy( cur_path, name );
         qsort( filenames, nfile, sizeof( filenames[0] ), cmp );
@@ -117,8 +122,47 @@ void do_ls_dir( char *name ) {
             }
         }
     }
-    for( int i = 0; i < nfile; ++i ) {
-        printf( "%s\n", filenames[i]->d_name );
+    if( flags[21] ) {           // -1
+        for( int i = 0; i < nfile; ++i ) {
+            printf( "%s\n", filenames[i]->d_name );
+        }
+    } else if( flags[10] ) {    // -l
+        ;
+    } else {
+        // -x
+        if( flags[20] ) {
+#define flagx
+        }
+        int maxcol = 0;
+        struct winsize wsize;
+        for( int i = 0; i < nfile; ++i ) {
+            int tcol = strlen( filenames[i]->d_name ) + 1;
+            if( flags[8] ) {
+                ;
+            }
+            if( flags[16] ) {
+                ;
+            }
+            maxcol = max( maxcol, tcol );
+        }
+        int nrow, ncol;
+        ioctl(STDOUT_FILENO, TIOCGWINSZ, &wsize);
+        ncol = wsize.ws_col / maxcol;
+        nrow = nfile / ncol;
+#ifdef flagx
+        for( int i = 0; i < nrow; ++i ) {
+            for( int j = 0; j < ncol; ++j ) {
+                printele( filenames[j * nrow + i] );
+#else
+        for( int i = 0; i < nrow; ++i ) {
+            for( int j = 0; j < ncol; ++i ) {
+                printele( filenames[i * ncol + j] );
+#endif
+            }
+        }
+        if( flags[20] ) {
+#undef flagx
+        }
     }
     return ;
 }
