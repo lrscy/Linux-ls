@@ -26,7 +26,7 @@ int max( int a, int b ) {
 void get_oprands( int argc, char **argv ) {
     memset( flags, false, sizeof( flags ) );
     char ch;
-    while( ( ch = getopt( argc, argv, "AaCcdFfhiklnqRrSstuw:x1" ) ) != -1 ) {
+    while( ( ch = getopt( argc, argv, "AaCcdFfhiklnqRrSstux1" ) ) != -1 ) {
         switch( ch ) {
             case 'A': flags[0] = true; break;
             case 'a': flags[1] = true; break;
@@ -35,9 +35,9 @@ void get_oprands( int argc, char **argv ) {
             case 'd': flags[4] = true; break;
             case 'F': flags[5] = true; break;
             case 'f': flags[6] = true; break;
-            case 'h': flags[7] = true; break;
+            case 'h': flags[7] = true; flags[9] = false; break;
             case 'i': flags[8] = true; break;
-            case 'k': flags[9] = true; break;
+            case 'k': flags[9] = true; flags[7] = false; break;
             case 'l': flags[10] = true; flags[21] = flags[2] = flags[11] = flags[20] = false; break;
             case 'n': flags[11] = true; flags[21] = flags[2] = flags[10] = flags[20] = false; break;
             case 'q': flags[12] = true; flags[19] = false; break;
@@ -47,11 +47,6 @@ void get_oprands( int argc, char **argv ) {
             case 's': flags[16] = true; break;
             case 't': flags[17] = true; flags[3] = flags[18] = false; break;
             case 'u': flags[18] = true; flags[3] = flags[17] = false; break;
-            case 'w': flags[19] = true; flags[12] = false;
-                      if( -1 == sscanf( optarg, "%d", &oprandw ) ) {
-                          printf( "ls : option needs a parameters -- w\n" );
-                      }
-                      break;
             case 'x': flags[20] = true; flags[21] = flags[2] = flags[10] = flags[11] = false; break;
             case '1': flags[21] = true; flags[2] = flags[10] = flags[11] = flags[20] = false; break;
         }
@@ -84,10 +79,98 @@ int cmp( const void *a, const void *b ) {
     return strcmp( ( *( struct dirent ** )a )->d_name, ( *( struct dirent ** )b )->d_name );    // default
 }
 
+void printname( struct dirent *dir, struct stat se ) {
+    printf( "%s", dir->d_name );
+    // -F
+    if( flags[5] ) {
+        if( dir->d_type & DT_DIR ) putchar( '/' );
+        else if( ( se->st_mode & S_IXUSR ) || ( se->mode & S_IXGRP ) || ( se->mode & S_IXOTH ) ) putchar( '*' );
+        else if( dir->d_type & DT_LNK ) putchar( '@' );
+        else if( dir->d_type & DT_WHT ) putchar( '%' );
+        else if( dir->d_type & DT_SOCK ) putchar( '=' );
+        else if( dir->d_type & DT_FIFO ) putchar( '|' );
+    }
+    putchar( ' ' );
+    return ;
+}
+
+void printele( struct dirent *dir ) {
+    char pathe[MAX_PATH_LEN];
+    strcpy( pathe, cur_path ); strcat( pathe, "/" ); strcat( patha, dir->d_name );
+    struct stat se;
+    lstat( pathe, &se );
+    // -i
+    if( flags[8] ) { printf( "%8u ", se.st_ino ); }
+    // -s
+    if( flags[16] ) { printf( "%4d ", se.st_blocks ); }
+    printname( dir, se );
+    return ;
+}
+
+void mode_to_letters( int mode, char *str ) {
+    strcpy( modes, "----------" );
+    if( S_ISDIR( mode ) ) str[0] = 'd';
+    if( S_ISCHR( mode ) ) str[0] = 'c';
+    if( S_ISBLK( mode ) ) str[0] = 'b';
+    if( mode & S_IRUSR ) str[1] = 'r';
+    if( mode & S_IWUSR ) str[2] = 'w';
+    if( mode & S_IXUSR ) str[3] = 'x';
+    if( mode & S_IRGRP ) str[4] = 'r';
+    if( mode & S_IWGRP ) str[5] = 'w';
+    if( mode & S_IXGRP ) str[6] = 'x';
+    if( mode & S_IROTH ) str[7] = 'r';
+    if( mode & S_IWOTH ) str[8] = 'w';
+    if( mode & S_IXOTH ) str[9] = 'x';
+    return ;
+}
+
+char * uid_to_name( uid_t uid ) {
+    struct passwd *ppw;
+    static char numstr[10];
+    if( ( ppw = getpwuid( uid ) ) == NULL || flags[11] ) {
+        sprintf( numstr, "%d", uid );
+        return numbstr;
+    }
+    return ppw->pw_name;
+}
+
+char * gid_to_name( gid_t gid ) {
+    struct group *pgrp;
+    static char numstr[10];
+    if( ( pgrp = getgrgid( gid ) ) == NULL || flags[11] ) {
+        sprintf( numstr, "%d", gid );
+        return numbstr;
+    }
+    return pgrp->gr_name;
+}
+
+void printsize( long s ) {
+    // -h
+    if( flag[7] ) printf( "%.1fK ", 1.0 * s / 1024 );
+    // -k
+    if( flag[9] ) printf( "%.8ld ", s );
+    return ;
+}
+
+void show_file_info( struct dirent *dir ) {
+    struct stat st;
+    char pathe[MAX_PATH_LEN], modes[11];
+    strcpy( pathe, cur_path ); strcat( pathe, "/" ); strcat( patha, dir->d_name );
+    lstat( pathe, &st );
+    mode_to_letters( st.st_mode, modes );
+    printf( "%s ", modes );
+    printf( "%4d ", st.st_nlink );
+    printf( "%-8s ", uid_to_name( st.st_uid ) );
+    printf( "%-8s ", gid_to_name( st.st_gid ) );
+    printsize( st.st_size );
+    printf( "%.12s ", 4 + ctime( &st.st_mtime ) );
+    printname( dir, st );
+    return ;
+}
+
 void do_ls_dir( char *name ) {
     DIR *pdir;
     struct dirent *filenames[MAXN];
-    struct stat status[MAXN];
     int nfile = 0;
     if( ( pdir = opendir( name ) ) == NULL ) {
         fprintf( stderr, "ls1: cannot open %s, not a directory.\n", name );
@@ -106,10 +189,6 @@ void do_ls_dir( char *name ) {
     closedir( pdir );
     // -f
     if( !flags[6] ) {
-//        for( int i = 0; i < nfile; ++i ) {
-//            printf( "%s -- ", filenames[i]->d_name );
-//        }
-        puts( "" );
         strcpy( cur_path, name );
         qsort( filenames, nfile, sizeof( filenames[0] ), cmp );
         // -r
@@ -126,8 +205,11 @@ void do_ls_dir( char *name ) {
         for( int i = 0; i < nfile; ++i ) {
             printf( "%s\n", filenames[i]->d_name );
         }
-    } else if( flags[10] ) {    // -l
-        ;
+    } else if( flags[10] ) {    // -l -n
+        strcpy( cur_path, name );
+        for( int i = 0; i < nfile; ++i ) {
+            show_file_info( filenames[i] );
+        }
     } else {
         // -x
         if( flags[20] ) {
@@ -135,14 +217,13 @@ void do_ls_dir( char *name ) {
         }
         int maxcol = 0;
         struct winsize wsize;
+        strcpy( cur_path, name );
         for( int i = 0; i < nfile; ++i ) {
             int tcol = strlen( filenames[i]->d_name ) + 1;
-            if( flags[8] ) {
-                ;
-            }
-            if( flags[16] ) {
-                ;
-            }
+            // -i
+            if( flags[8] ) tcol += 9;
+            // -s
+            if( flags[16] ) tcol += 5;
             maxcol = max( maxcol, tcol );
         }
         int nrow, ncol;
@@ -151,14 +232,14 @@ void do_ls_dir( char *name ) {
         nrow = nfile / ncol;
 #ifdef flagx
         for( int i = 0; i < nrow; ++i ) {
-            for( int j = 0; j < ncol; ++j ) {
+            for( int j = 0; j < ncol; ++j )
                 printele( filenames[j * nrow + i] );
 #else
         for( int i = 0; i < nrow; ++i ) {
-            for( int j = 0; j < ncol; ++i ) {
+            for( int j = 0; j < ncol; ++i )
                 printele( filenames[i * ncol + j] );
 #endif
-            }
+            puts( "" );
         }
         if( flags[20] ) {
 #undef flagx
