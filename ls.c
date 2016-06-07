@@ -1,4 +1,5 @@
 #include <sys/types.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <dirent.h>
 #include <stdlib.h>
@@ -19,7 +20,7 @@ char cur_path[MAX_PATH_LEN];
 bool flags[30];
 int oprandw, ndir;
 
-int max( int a, int b ) {
+int max( long long a, long long b ) {
     return a > b ? a : b;
 }
 
@@ -75,7 +76,7 @@ int cmp( const void *a, const void *b ) {
     if( flags[17] ) return sa.st_mtime - sb.st_mtime;       // -t
     else if( flags[3] ) return sa.st_ctime - sb.st_ctime;   // -c
     else if( flags[18] ) return sa.st_atime - sb.st_atime;  // -u
-    else if( flags )  return sb.st_size - sa.st_size;       // -S
+    else if( flags[15] )  return sb.st_size - sa.st_size;       // -S
     return strcmp( ( *( struct dirent ** )a )->d_name, ( *( struct dirent ** )b )->d_name );    // default
 }
 
@@ -84,7 +85,7 @@ void printname( struct dirent *dir, struct stat se ) {
     // -F
     if( flags[5] ) {
         if( dir->d_type & DT_DIR ) putchar( '/' );
-        else if( ( se->st_mode & S_IXUSR ) || ( se->mode & S_IXGRP ) || ( se->mode & S_IXOTH ) ) putchar( '*' );
+        else if( ( se.st_mode & S_IXUSR ) || ( se.st_mode & S_IXGRP ) || ( se.st_mode & S_IXOTH ) ) putchar( '*' );
         else if( dir->d_type & DT_LNK ) putchar( '@' );
         else if( dir->d_type & DT_WHT ) putchar( '%' );
         else if( dir->d_type & DT_SOCK ) putchar( '=' );
@@ -96,19 +97,19 @@ void printname( struct dirent *dir, struct stat se ) {
 
 void printele( struct dirent *dir ) {
     char pathe[MAX_PATH_LEN];
-    strcpy( pathe, cur_path ); strcat( pathe, "/" ); strcat( patha, dir->d_name );
+    strcpy( pathe, cur_path ); strcat( pathe, "/" ); strcat( pathe, dir->d_name );
     struct stat se;
     lstat( pathe, &se );
     // -i
-    if( flags[8] ) { printf( "%8u ", se.st_ino ); }
+    if( flags[8] ) printf( "%8lu ", se.st_ino );
     // -s
-    if( flags[16] ) { printf( "%4d ", se.st_blocks ); }
+    if( flags[16] ) printf( "%4lu ", se.st_blocks );
     printname( dir, se );
     return ;
 }
 
 void mode_to_letters( int mode, char *str ) {
-    strcpy( modes, "----------" );
+    strcpy( str, "----------" );
     if( S_ISDIR( mode ) ) str[0] = 'd';
     if( S_ISCHR( mode ) ) str[0] = 'c';
     if( S_ISBLK( mode ) ) str[0] = 'b';
@@ -129,7 +130,7 @@ char * uid_to_name( uid_t uid ) {
     static char numstr[10];
     if( ( ppw = getpwuid( uid ) ) == NULL || flags[11] ) {
         sprintf( numstr, "%d", uid );
-        return numbstr;
+        return numstr;
     }
     return ppw->pw_name;
 }
@@ -139,32 +140,38 @@ char * gid_to_name( gid_t gid ) {
     static char numstr[10];
     if( ( pgrp = getgrgid( gid ) ) == NULL || flags[11] ) {
         sprintf( numstr, "%d", gid );
-        return numbstr;
+        return numstr;
     }
     return pgrp->gr_name;
 }
 
 void printsize( long s ) {
     // -h
-    if( flag[7] ) printf( "%.1fK ", 1.0 * s / 1024 );
+    if( flags[7] ) printf( "%.1fK ", 1.0 * s / 1024 );
     // -k
-    if( flag[9] ) printf( "%.8ld ", s );
+    if( flags[9] ) printf( "%.8ld ", s );
     return ;
 }
 
+// -l -n
 void show_file_info( struct dirent *dir ) {
     struct stat st;
     char pathe[MAX_PATH_LEN], modes[11];
-    strcpy( pathe, cur_path ); strcat( pathe, "/" ); strcat( patha, dir->d_name );
+    strcpy( pathe, cur_path ); strcat( pathe, "/" ); strcat( pathe, dir->d_name );
     lstat( pathe, &st );
+    // -i
+    if( flags[8] ) printf( "%-8lu ", st.st_ino );
+    // -s
+    if( flags[16] ) printf( "%-4lu ", st.st_blocks );
     mode_to_letters( st.st_mode, modes );
     printf( "%s ", modes );
-    printf( "%4d ", st.st_nlink );
+    printf( "%4lu ", st.st_nlink );
     printf( "%-8s ", uid_to_name( st.st_uid ) );
     printf( "%-8s ", gid_to_name( st.st_gid ) );
     printsize( st.st_size );
     printf( "%.12s ", 4 + ctime( &st.st_mtime ) );
     printname( dir, st );
+    puts( "" );
     return ;
 }
 
@@ -180,8 +187,8 @@ void do_ls_dir( char *name ) {
         // -a
         if( flags[1] ) { ++nfile; continue; }
         // -A
-        if( flags[0] && !strcmp( filenames[nfile]->d_name, "." ) &&
-                        !strcmp( filenames[nfile]->d_name, ".." ) ) {
+        if( flags[0] && strcmp( filenames[nfile]->d_name, "." ) &&
+                        strcmp( filenames[nfile]->d_name, ".." ) ) {
             ++nfile; continue;
         }
         if( filenames[nfile]->d_name[0] != '.' ) ++nfile;
@@ -211,12 +218,9 @@ void do_ls_dir( char *name ) {
             show_file_info( filenames[i] );
         }
     } else {
-        // -x
-        if( flags[20] ) {
-#define flagx
-        }
         int maxcol = 0;
         struct winsize wsize;
+        int nrow, ncol;
         strcpy( cur_path, name );
         for( int i = 0; i < nfile; ++i ) {
             int tcol = strlen( filenames[i]->d_name ) + 1;
@@ -226,23 +230,25 @@ void do_ls_dir( char *name ) {
             if( flags[16] ) tcol += 5;
             maxcol = max( maxcol, tcol );
         }
-        int nrow, ncol;
-        ioctl(STDOUT_FILENO, TIOCGWINSZ, &wsize);
-        ncol = wsize.ws_col / maxcol;
-        nrow = nfile / ncol;
-#ifdef flagx
-        for( int i = 0; i < nrow; ++i ) {
-            for( int j = 0; j < ncol; ++j )
-                printele( filenames[j * nrow + i] );
-#else
-        for( int i = 0; i < nrow; ++i ) {
-            for( int j = 0; j < ncol; ++i )
-                printele( filenames[i * ncol + j] );
-#endif
-            puts( "" );
-        }
-        if( flags[20] ) {
-#undef flagx
+        ioctl( STDOUT_FILENO, TIOCGWINSZ, &wsize );
+        ncol = wsize.ws_col / maxcol; if( ncol == 0 ) ncol = 1;
+        nrow = nfile / ncol; if( nrow == 0 ) nrow = 1;
+        if( flags[20] ) { // -x
+            for( int i = 0; i < nrow; ++i ) {
+                for( int j = 0; j < ncol; ++j ) {
+                    if( j * nrow + i >= nfile ) continue;
+                    printele( filenames[j * nrow + i] );
+                }
+                puts( "" );
+            }
+        } else {
+            for( int i = 0; i < nrow; ++i ) {
+                for( int j = 0; j < ncol; ++j ) {
+                    if( i * ncol + j >= nfile ) continue;
+                    printele( filenames[i * ncol + j] );
+                }
+                puts( "" );
+            }
         }
     }
     return ;
